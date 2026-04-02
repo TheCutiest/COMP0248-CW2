@@ -1,0 +1,13 @@
+cat > .gitignore << 'EOF'
+output/
+*_midas_vis/
+*_depth_vis/
+__pycache__/
+*.pyc
+*.bag
+*.zip
+*.pth
+*.pt
+*.ckpt
+*.npz
+EOF
