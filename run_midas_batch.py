@@ -27,6 +27,11 @@ def parse_args():
         default=5,
         help="How many prediction visualizations to save"
     )
+    parser.add_argument(
+        "--save_aligned_depth",
+        action="store_true",
+        help="Save aligned predicted depth maps for later reprojection / view synthesis"
+    )
     return parser.parse_args()
 
 
@@ -67,23 +72,36 @@ def make_depth_vis(depth_map):
     return depth_vis
 
 
+def sanitize_model_name(model_type):
+    return model_type.replace("/", "_").replace(" ", "_")
+
+
 def main():
     args = parse_args()
 
     dataset_name = args.dataset
     model_type = args.model
     save_vis_count = args.save_vis_count
+    save_aligned_depth = args.save_aligned_depth
 
     rgb_dir = f"{dataset_name}_rgb"
     depth_dir = f"{dataset_name}_depth"
-    vis_dir = f"{dataset_name}_midas_vis"
+    vis_dir = f"{dataset_name}_{sanitize_model_name(model_type)}_vis"
 
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(vis_dir, exist_ok=True)
 
-    metrics_csv = os.path.join(output_dir, f"{dataset_name}_dpt_metrics.csv")
-    summary_txt = os.path.join(output_dir, f"{dataset_name}_dpt_summary.txt")
+    model_tag = sanitize_model_name(model_type)
+    metrics_csv = os.path.join(output_dir, f"{dataset_name}_{model_tag}_metrics.csv")
+    summary_txt = os.path.join(output_dir, f"{dataset_name}_{model_tag}_summary.txt")
+
+    aligned_depth_npy_dir = os.path.join(output_dir, f"{dataset_name}_{model_tag}_depth_aligned_npy")
+    aligned_depth_png_dir = os.path.join(output_dir, f"{dataset_name}_{model_tag}_depth_aligned_png")
+
+    if save_aligned_depth:
+        os.makedirs(aligned_depth_npy_dir, exist_ok=True)
+        os.makedirs(aligned_depth_png_dir, exist_ok=True)
 
     if not os.path.isdir(rgb_dir):
         raise FileNotFoundError(f"RGB directory not found: {rgb_dir}")
@@ -165,14 +183,31 @@ def main():
         mae_list.append(mae)
         absrel_list.append(abs_rel)
 
+        image_name = os.path.basename(rgb_path)
+
         records.append({
-            "image": os.path.basename(rgb_path),
+            "image": image_name,
             "rmse": float(rmse),
             "mae": float(mae),
             "abs_rel": float(abs_rel),
             "scale": float(scale),
             "valid_pixels": int(mask.sum()),
         })
+
+        if save_aligned_depth:
+            stem = os.path.splitext(image_name)[0]
+
+            np.save(
+                os.path.join(aligned_depth_npy_dir, f"{stem}.npy"),
+                pred_aligned.astype(np.float32)
+            )
+
+            pred_vis = make_depth_vis(pred_aligned)
+            if pred_vis is not None:
+                cv2.imwrite(
+                    os.path.join(aligned_depth_png_dir, f"{stem}.png"),
+                    pred_vis
+                )
 
         if i < save_vis_count:
             pred_vis = make_depth_vis(pred_aligned)
@@ -182,7 +217,7 @@ def main():
 
         print(
             f"[{i+1}/{len(rgb_files)}] "
-            f"{os.path.basename(rgb_path)} | "
+            f"{image_name} | "
             f"RMSE={rmse:.2f}, MAE={mae:.2f}, AbsRel={abs_rel:.4f}"
         )
 
@@ -222,6 +257,9 @@ def main():
     print(f"Saved metrics to {metrics_csv}")
     print(f"Saved summary to {summary_txt}")
     print(f"Saved visualizations to {vis_dir}")
+    if save_aligned_depth:
+        print(f"Saved aligned depth npy to {aligned_depth_npy_dir}")
+        print(f"Saved aligned depth png to {aligned_depth_png_dir}")
 
 
 if __name__ == "__main__":
